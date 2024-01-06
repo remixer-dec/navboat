@@ -9,11 +9,12 @@ import atexit
 import webbrowser
 import select
 import threading
-from utils import get_open_host_ports, health_check, get_status_emoji
+from utils import get_open_host_ports, health_check, get_status_emoji, get_process_memory
 from time import time
 
 config = None
 known_actions = {}
+total_running = 0
 
 
 def cleanup():
@@ -26,18 +27,37 @@ atexit.register(cleanup)
 
 
 def timer_checker(t):
+    global total_running
+    should_rebuild_menu = False
+    total_running = 0
     for i in list(known_actions):
         action = known_actions[i]
         process = action.get("_runner", None)
         if process and action.get("background"):
             health_check(process, partial(stop_subprocess, action))
-            print("health heck")
-            if int(time() - action.get("_started")) < 60:
+            if int(time() - action.get("_started", 0)) < 60:
                 action["_hosts"] = get_open_host_ports(process)
-                build_menu(app)
+                should_rebuild_menu = True
+        if process:
+            total_running += 1
+    print(time() // 1 % 60)
+    if time() // 1 % 60 < 8:
+        should_rebuild_menu = True
+    if should_rebuild_menu:
+        build_menu()
 
 
 timer = rumps.Timer(timer_checker, 5)
+
+
+def custom_args_window(action, caller):
+    result = rumps.Window(
+        f"""Please specify the arguments to run {action["command"]}\nRunning in {action["dir"]}""",
+        "Edit arguments",
+        action.get("arguments"),
+    ).run()
+    action["arguments"] = result.text
+    build_menu()
 
 
 def stop_subprocess(action):
@@ -54,17 +74,16 @@ def stop_subprocess(action):
         action["_runner"] = False
         action["_is_running"] = False
         del action["_started"]
-        if action.get("_timer"):
-            action["_timer"].stop()
         if action.get("_hosts"):
             del action["_hosts"]
-        build_menu(app)
+        build_menu()
 
 
 def generate_action_menu(action):
     known_actions.setdefault(action["name"], action)
     is_running = False
     is_service = False
+    is_started = action.get("_started", False)
 
     if action.get("background", False):
         is_service = True
@@ -98,14 +117,13 @@ def generate_action_menu(action):
             )
 
             def run_subprocess(action, runner):
-                global timer
                 process = runner()
                 wait_for_text = action.get("wait_for")
                 action["_runner"] = process
                 action["_started"] = time()
                 if action.get("background") and not wait_for_text:
                     action["_is_running"] = True
-                build_menu(app)
+                build_menu()
                 if wait_for_text:
                     while True:
                         ready, _, _ = select.select([process.stdout], [], [], config["options"]["wait_for_timeout"])
@@ -119,7 +137,7 @@ def generate_action_menu(action):
                             break
                     action["_hosts"] = get_open_host_ports(process)
                     action["_is_running"] = True
-                    build_menu(app)
+                    build_menu()
 
             if config["options"]["use_threads"]:
                 running_function = partial(threading.Thread(target=run_subprocess, args=(action, process_runner)).start)
@@ -128,6 +146,8 @@ def generate_action_menu(action):
     toggle_action_text = "⏹ Stop service" if is_running else ("▶️ Start service" if is_service else "🚀 Run")
 
     action_menu = [rumps.MenuItem(toggle_action_text, callback=(lambda x: running_function()) if running_function else None)]
+    if not is_started:
+        action_menu.append(rumps.MenuItem("🎚️ Edit args", callback=partial(custom_args_window, action)))
     hosts = action.get("_hosts", [])
     for host in hosts:
         action_menu.insert(
@@ -143,7 +163,8 @@ def generate_action_menu(action):
 def build_nested_menu(menu_items, menu):
     for item in menu_items:
         if isinstance(item, dict):
-            subitem = rumps.MenuItem(item.get("name", "Unknown") + get_status_emoji(item))
+            memory_used = get_process_memory(item, config)
+            subitem = rumps.MenuItem(item.get("name", "Unknown") + get_status_emoji(item) + memory_used)
             subitem.update(generate_action_menu(item))
             menu.append(subitem)
         elif isinstance(item, str):
@@ -159,12 +180,17 @@ def build_nested_menu(menu_items, menu):
     return menu
 
 
-def build_menu(app):
+def build_menu(custom_app=None):
+    global app
     main_menu = []
     build_nested_menu(config.get("actions", []), main_menu)
     main_menu.append(rumps.MenuItem(title="Quit", callback=rumps.quit_application))
+    if custom_app:
+        app = custom_app
     app.menu.clear()
     app.menu.update(main_menu)
+    if config["options"]["show_active_tasks"]:
+        app.title = str(total_running)
 
 
 def parse_config():

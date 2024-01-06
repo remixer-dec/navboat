@@ -15,6 +15,17 @@ def health_check(process, callback_when_dead):
         callback_when_dead()
 
 
+def get_process_memory(action, config):
+    if not config["options"]["show_memory_usage"]:
+        return ""
+    runner = action.get("_runner")
+    if runner:
+        process = psutil.Process(runner.pid)
+        used = process.memory_info().rss
+        return f" [{round(used / (1024**3), 3)}G]"
+    return ""
+
+
 def get_status_emoji(action):
     if action.get("background"):
         return (
