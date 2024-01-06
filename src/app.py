@@ -7,17 +7,37 @@ import signal
 import shlex
 import atexit
 import webbrowser
-from utils import get_open_host_ports
+import select
+import threading
+from utils import get_open_host_ports, health_check, get_status_emoji
+from time import time
 
 config = None
+known_actions = {}
 
 
 def cleanup():
+    timer.stop()
     os.killpg(os.getpgid(os.getpid()), signal.SIGTERM)
     return True
 
 
 atexit.register(cleanup)
+
+
+def timer_checker(t):
+    for i in list(known_actions):
+        action = known_actions[i]
+        process = action.get("_runner", None)
+        if process and action.get("background"):
+            health_check(process, partial(stop_subprocess, action))
+            print("health heck")
+            if int(time() - action.get("_started")) < 60:
+                action["_hosts"] = get_open_host_ports(process)
+                build_menu(app)
+
+
+timer = rumps.Timer(timer_checker, 5)
 
 
 def stop_subprocess(action):
@@ -31,13 +51,18 @@ def stop_subprocess(action):
         process.wait()
 
     finally:
-        action["_runner"] = None
+        action["_runner"] = False
         action["_is_running"] = False
-        del action["_hosts"]
+        del action["_started"]
+        if action.get("_timer"):
+            action["_timer"].stop()
+        if action.get("_hosts"):
+            del action["_hosts"]
         build_menu(app)
 
 
 def generate_action_menu(action):
+    known_actions.setdefault(action["name"], action)
     is_running = False
     is_service = False
 
@@ -46,6 +71,8 @@ def generate_action_menu(action):
         if action.get("_is_running", False):
             is_running = True
     running_function = None
+    if action.get("_started") and not is_running:
+        return []
 
     if action.get("type", "subprocess") == "subprocess":
         runner = action.get("_runner", None)
@@ -53,6 +80,7 @@ def generate_action_menu(action):
             running_function = partial(stop_subprocess, action)
             if runner.poll() is not None:
                 is_running = False
+                stop_subprocess(action)
 
         if not runner:
             cwd = action.get("dir", os.getcwd())
@@ -70,24 +98,34 @@ def generate_action_menu(action):
             )
 
             def run_subprocess(action, runner):
+                global timer
                 process = runner()
+                wait_for_text = action.get("wait_for")
                 action["_runner"] = process
-                if action.get("background"):
+                action["_started"] = time()
+                if action.get("background") and not wait_for_text:
                     action["_is_running"] = True
                 build_menu(app)
-                wait_for_text = action.get("wait_for")
                 if wait_for_text:
                     while True:
+                        ready, _, _ = select.select([process.stdout], [], [], config["options"]["wait_for_timeout"])
+                        if not ready:
+                            break
                         line = process.stdout.readline()
+                        print(line, end="")
                         if not line:
                             break
                         if wait_for_text in line:
-                            action["_hosts"] = get_open_host_ports(process)
-                            build_menu(app)
                             break
+                    action["_hosts"] = get_open_host_ports(process)
+                    action["_is_running"] = True
+                    build_menu(app)
 
-            running_function = partial(run_subprocess, action, process_runner)
-    toggle_action_text = "⏹ Stop service" if is_running else ("▶️ Start service" if is_service else "Run")
+            if config["options"]["use_threads"]:
+                running_function = partial(threading.Thread(target=run_subprocess, args=(action, process_runner)).start)
+            else:
+                running_function = partial(run_subprocess, action, process_runner)
+    toggle_action_text = "⏹ Stop service" if is_running else ("▶️ Start service" if is_service else "🚀 Run")
 
     action_menu = [rumps.MenuItem(toggle_action_text, callback=(lambda x: running_function()) if running_function else None)]
     hosts = action.get("_hosts", [])
@@ -96,7 +134,7 @@ def generate_action_menu(action):
             0,
             rumps.MenuItem(
                 f"🌐 {host}",
-                callback=lambda x: webbrowser.get(config["options"]["preferred_browser"]).open_new_tab("http://" + host),
+                callback=lambda x, h="http://" + host: webbrowser.get(config["options"]["preferred_browser"]).open_new_tab(h),
             ),
         )
     return action_menu
@@ -105,7 +143,7 @@ def generate_action_menu(action):
 def build_nested_menu(menu_items, menu):
     for item in menu_items:
         if isinstance(item, dict):
-            subitem = rumps.MenuItem(item.get("name", "Unknown"))
+            subitem = rumps.MenuItem(item.get("name", "Unknown") + get_status_emoji(item))
             subitem.update(generate_action_menu(item))
             menu.append(subitem)
         elif isinstance(item, str):
@@ -152,4 +190,5 @@ if __name__ == "__main__":
     app = NavBoatApp("TestApp", template=True, quit_button=None)
     app.icon = "icon.png"
     app.title = ""
+    timer.start()
     app.run()
