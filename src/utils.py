@@ -7,12 +7,10 @@ def get_open_host_ports(process):
     if process.status() != psutil.STATUS_RUNNING:
         return []
     connections = process.connections()
-    for conn in connections:
-        print(conn, dir(conn))
     open_host_ports = set(
         f"{conn.laddr.ip.replace('::1', '0.0.0.0')}:{conn.laddr.port}"
         for conn in connections
-        if conn.status != psutil.CONN_ESTABLISHED
+        if conn.status != psutil.CONN_ESTABLISHED and conn.laddr.port <= 50000
     )
 
     for sub in process.children():
@@ -38,7 +36,7 @@ def get_process_memory(action, config):
                 used += sub.memory_info().rss
         except Exception:
             used = 0
-        return f" [{round(used / (1024**3), 3)}G]"
+        return f" [{round(used / (1024**3), 2)}G]"
     return ""
 
 
