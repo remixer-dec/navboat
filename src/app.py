@@ -35,7 +35,7 @@ def status_checker(t):
     for i in list(known_actions):
         action = known_actions[i]
         process = action.get("_runner", None)
-        if process and action.get("background"):
+        if process:
             health_check(process, partial(stop_subprocess, action))
             if int(time() - action.get("_started", 0)) < 60 or should_rebuild_menu:
                 action["_hosts"] = get_open_host_ports(process)
@@ -53,9 +53,9 @@ timer = rumps.Timer(status_checker, 5)
 
 def custom_args_window(action, caller):
     result = rumps.Window(
-        f"""Please specify the arguments to run {action["command"]}\nRunning in {action["dir"]}""",
+        f"""Please specify the arguments to run {action["command"]}\nRunning in {action.get("dir", os.getcwd())}""",
         "Edit arguments",
-        action.get("arguments"),
+        action.get("arguments", ""),
     ).run()
     action["arguments"] = result.text
     build_menu()
@@ -142,14 +142,14 @@ def generate_action_menu(action):
                 is_running = False
                 stop_subprocess(action)
 
-        process_runner = get_subprocess(action, [action.get("command")] + shlex.split(action.get("arguments")))
+        process_runner = get_subprocess(action, [action.get("command")] + shlex.split(action.get("arguments", "")))
 
         def run_subprocess(action, runner):
             process = runner()
             wait_for_text = action.get("wait_for")
             action["_runner"] = process
             action["_started"] = time()
-            if action.get("background") and not wait_for_text:
+            if not wait_for_text:
                 action["_is_running"] = True
             build_menu()
             if wait_for_text:
@@ -177,7 +177,7 @@ def generate_action_menu(action):
         start_function()
     toggle_action_function = start_function if not runner else stop_function
     action_menu = [rumps.MenuItem(toggle_action_text, callback=lambda x: toggle_action_function())]
-    if not is_started:
+    if not is_started and action.get("arguments"):
         action_menu.append(rumps.MenuItem("🎚️ Edit args", callback=partial(custom_args_window, action)))
     elif is_running:
         action_menu.append(rumps.MenuItem("🔄 Restart", callback=lambda x: [stop_function(), start_function()]))

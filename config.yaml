@@ -1,0 +1,100 @@
+# Configuration Options
+options:
+  show_memory_usage: false
+  show_active_tasks: false
+  show_open_ports: true
+  wait_for_timeout: 20
+  use_threads: true
+  preferred_browser: Firefox
+  replace_ip_with_localhost: true
+
+# Actions
+actions:
+# Categories
+  LLM:
+    - name: Llama.cpp server
+      type: subprocess
+      background: true
+      dir: /Users/remixer/ML/LLaMA/lcpprepo/
+      command: ./server
+      arguments: -m /Users/remixer/ML/LLaMA/llama.cpp/mistral-7b-openorca.Q4_K_M.gguf -ngl 1
+      wait_for: listening
+      subactions:
+        - name: 🔄 Update & rebuild
+          when: stopped
+          window: true
+          command: |
+            git pull
+            make clean
+            env -i make
+            exit
+
+    - name: Oobabooga webui
+      type: subprocess
+      background: true
+      dir: /Users/remixer/ML/text-generation-webui
+      command: python3.10
+      arguments: server.py --api --n-gpu-layers 1000 --n_ctx 2048
+      venv: /Users/remixer/.local/share/virtualenvs/text-generation-webui-becjsGqn/bin/activate
+
+    - name: SillyTavern
+      type: subprocess
+      background: true
+      dir: /Users/remixer/ML/SillyTavern-1.11.0/
+      command: node
+      arguments: server.js
+      wait_for: listening
+
+    - name: Ollama
+      type: subprocess
+      background: true
+      dir: /Users/remixer/
+      command: ollama
+      arguments: serve
+      #autorun: true
+    
+    - name: Botality
+      type: subprocess
+      background: true
+      dir: /Users/remixer/ML/botality/
+      command: python3.10
+      arguments: dashboard.py --autostart --env env/english.env
+      env:
+        lang: 'en'
+      subactions:
+        - name: 🤖 Project page 
+          when: stopped
+          command: open "https://github.com/remixer-dec/botality-ii"
+
+
+  TTI:
+    - name: A1111 SD webui
+      type: subprocess
+      background: true
+      dir: /Users/remixer/ML/sdupd/
+      command: python3.10
+      arguments: webui.py --api --upcast-sampling --opt-sub-quad-attention --no-half-vae --cors-allow-origins=https://www.painthua.com
+
+    - name: ComfyUI
+      type: subprocess
+      background: true
+      dir: /Users/remixer/ML/comfy
+      venv: /Users/remixer/.local/share/virtualenvs/comfy-5lUzAdgT/bin/activate
+      command: python3.10
+      arguments: main.py --force-fp16 --lowvram
+
+    - name: InvokeAI
+      type: subprocess
+      background: true
+      dir: /Users/remixer/ML/invoke3
+      command: invokeai-web
+      arguments: --ignore_missing_core_models  --lora_dir ../sdupd/models/Lora/ --node_cache_size 0 --controlnet_dir ../sdupd/models/ControlNet
+      wait_for: running
+  
+  Commands:
+    Cache:
+      - name: Clean pip & npm
+        type: subprocess
+        command: npm cache clean --force && pip cache purge && pip3.10 cache purge
+        shell: True
+
