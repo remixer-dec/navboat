@@ -26,28 +26,28 @@ def cleanup():
 atexit.register(cleanup)
 
 
-def timer_checker(t):
+def status_checker(t):
     global total_running
-    should_rebuild_menu = False
+    should_rebuild_menu = time() // 1 % 60 < 6
+    prev_running = total_running
     total_running = 0
     for i in list(known_actions):
         action = known_actions[i]
         process = action.get("_runner", None)
         if process and action.get("background"):
             health_check(process, partial(stop_subprocess, action))
-            if int(time() - action.get("_started", 0)) < 60:
+            if int(time() - action.get("_started", 0)) < 60 or should_rebuild_menu:
                 action["_hosts"] = get_open_host_ports(process)
                 should_rebuild_menu = True
         if process:
             total_running += 1
-    print(time() // 1 % 60)
-    if time() // 1 % 60 < 8:
+    if prev_running != total_running:
         should_rebuild_menu = True
     if should_rebuild_menu:
         build_menu()
 
 
-timer = rumps.Timer(timer_checker, 5)
+timer = rumps.Timer(status_checker, 5)
 
 
 def custom_args_window(action, caller):
@@ -58,6 +58,34 @@ def custom_args_window(action, caller):
     ).run()
     action["arguments"] = result.text
     build_menu()
+
+
+def setup_env(action):
+    action_env = action.get("env")
+    if not action_env:
+        return None
+    if action_env.get("_clean") is True:
+        return action_env
+    else:
+        return {**os.environ.copy(), **action_env}
+
+
+def get_subprocess(action, run_command):
+    if action.get("venv"):
+        run_command = f'source {action.get("venv")} && ' + (" ").join(run_command)
+        print(run_command)
+    return partial(
+        subprocess.Popen,
+        run_command,
+        cwd=action.get("dir", os.getcwd()),
+        stdin=subprocess.PIPE,
+        stdout=subprocess.PIPE,
+        close_fds=True,
+        universal_newlines=True,
+        shell=action.get("shell", False),
+        env=setup_env(action),
+        start_new_session=False,
+    )
 
 
 def stop_subprocess(action):
@@ -102,19 +130,7 @@ def generate_action_menu(action):
                 stop_subprocess(action)
 
         if not runner:
-            cwd = action.get("dir", os.getcwd())
-
-            process_runner = partial(
-                subprocess.Popen,
-                [action.get("command")] + shlex.split(action.get("arguments")),
-                cwd=cwd,
-                stdin=subprocess.PIPE,
-                stdout=subprocess.PIPE,
-                close_fds=True,
-                universal_newlines=True,
-                shell=False,
-                start_new_session=False,
-            )
+            process_runner = get_subprocess(action, [action.get("command")] + shlex.split(action.get("arguments")))
 
             def run_subprocess(action, runner):
                 process = runner()
@@ -150,6 +166,8 @@ def generate_action_menu(action):
         action_menu.append(rumps.MenuItem("🎚️ Edit args", callback=partial(custom_args_window, action)))
     hosts = action.get("_hosts", [])
     for host in hosts:
+        if config["options"]["replace_ip_with_localhost"]:
+            host = host.replace("127.0.0.1", "localhost")
         action_menu.insert(
             0,
             rumps.MenuItem(

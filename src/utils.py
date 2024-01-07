@@ -3,10 +3,21 @@ import psutil
 
 def get_open_host_ports(process):
     pid = process.pid
-    if process.poll() is not None:
+    process = psutil.Process(pid)
+    if process.status() != psutil.STATUS_RUNNING:
         return []
-    connections = psutil.Process(pid).connections()
-    open_host_ports = set(f"{conn.laddr.ip}:{conn.laddr.port}" for conn in connections)
+    connections = process.connections()
+    for conn in connections:
+        print(conn, dir(conn))
+    open_host_ports = set(
+        f"{conn.laddr.ip.replace('::1', '0.0.0.0')}:{conn.laddr.port}"
+        for conn in connections
+        if conn.status != psutil.CONN_ESTABLISHED
+    )
+
+    for sub in process.children():
+        open_host_ports.update(get_open_host_ports(sub))
+
     return list(open_host_ports)
 
 
@@ -20,8 +31,13 @@ def get_process_memory(action, config):
         return ""
     runner = action.get("_runner")
     if runner:
-        process = psutil.Process(runner.pid)
-        used = process.memory_info().rss
+        try:
+            process = psutil.Process(runner.pid)
+            used = process.memory_info().rss
+            for sub in process.children():
+                used += sub.memory_info().rss
+        except Exception:
+            used = 0
         return f" [{round(used / (1024**3), 3)}G]"
     return ""
 
