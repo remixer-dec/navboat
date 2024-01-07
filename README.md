@@ -14,16 +14,16 @@ Transform your cli services into a YAML config file and run them in 2 clicks!
 ### Features
 - Supports background services
 - Shows open ports for running services, click on a host opens a browser tab
-- Can show status and phisical memory, of a process, including its spawned subprocesses.
+- Can show status and physical memory, of a process, including its spawned subprocesses.
 - Supports virtual environments
 - Supports environment variables
-- Supports service autorun
+- Supports service auto-run
 - Supports nested categories
 - Fully shuts down all processes on exit
 - Supports additional actions (like updating or building)
 
 ### Setup
-`pip install rumps psutil PyYAML`
+`pip install rumps psutil PyYAML`  
 `python src/app.py`
 
 ### Project status
@@ -49,7 +49,7 @@ It is partially updated every 5 seconds with a full refresh every minute.
       window: bool # open terminal window.
       autorun: bool # run the service when this app is started.
       subactions: # a list of extra actions to run
-        - name: Update #subaction name
+        - name: Update # subaction name
           when: stopped # when to show the action (update & rebuild only whe the service is running, make api calls when it is running)
           window: true # open terminal window
           command: | # list of commands to run, will be concatinated with `&&`
@@ -59,7 +59,7 @@ It is partially updated every 5 seconds with a full refresh every minute.
             exit
 ```
 
-### Improvement ideas:
+### Improvement ideas
 - cron-like services
 - profiles for various arguments
 - auto-file-dir argument, selecting a file from directory and passing it as an argument (useful for LLM files)
